@@ -9,7 +9,6 @@ import {
 } from '@jupyterlab/ui-components';
 
 import * as React from 'react';
-
 import type { IKnownModule } from './known-modules';
 import {
   type ICommandArgumentDocumentation,
@@ -18,6 +17,7 @@ import {
 } from './command-completion';
 import {
   copyValueToClipboard,
+  normalizeQuery,
   openExternalLink,
   setCopiedStateWithTimeout
 } from './contents';
@@ -64,6 +64,37 @@ interface IKnownModuleLink {
   url: string;
 }
 const EXTENSION_POINT_PANEL_ID = 'jp-PluginPlayground-extensionPointPanel';
+
+export function filterTokenRecords(
+  tokens: ReadonlyArray<TokenSidebar.ITokenRecord>,
+  query: string
+): ReadonlyArray<TokenSidebar.ITokenRecord> {
+  const normalizedQuery = normalizeQuery(query);
+  if (!normalizedQuery) {
+    return tokens;
+  }
+  return tokens.filter(
+    token =>
+      token.name.toLowerCase().includes(normalizedQuery) ||
+      token.description.toLowerCase().includes(normalizedQuery)
+  );
+}
+
+export function filterCommandRecords(
+  commands: ReadonlyArray<ICommandRecord>,
+  query: string
+): ReadonlyArray<ICommandRecord> {
+  const normalizedQuery = normalizeQuery(query);
+  if (!normalizedQuery) {
+    return commands;
+  }
+  return commands.filter(
+    command =>
+      command.id.toLowerCase().includes(normalizedQuery) ||
+      command.label.toLowerCase().includes(normalizedQuery) ||
+      command.caption.toLowerCase().includes(normalizedQuery)
+  );
+}
 
 export class TokenSidebar extends ReactWidget {
   private readonly _getTokens: () => ReadonlyArray<TokenSidebar.ITokenRecord>;
@@ -125,7 +156,6 @@ export class TokenSidebar extends ReactWidget {
   }
 
   render(): JSX.Element {
-    const query = this._query.trim().toLowerCase();
     const isTokenView = this._activeView === 'tokens';
     const isCommandView = this._activeView === 'commands';
     const isPackagesView = this._activeView === 'packages';
@@ -139,39 +169,24 @@ export class TokenSidebar extends ReactWidget {
 
     if (isTokenView) {
       tokens = this._getTokens();
-      filteredTokens =
-        query.length > 0
-          ? tokens.filter(
-              token =>
-                token.name.toLowerCase().includes(query) ||
-                token.description.toLowerCase().includes(query)
-            )
-          : tokens;
+      filteredTokens = filterTokenRecords(tokens, this._query);
     } else if (isCommandView) {
       commands = this._getCommands();
-      filteredCommands =
-        query.length > 0
-          ? commands.filter(
-              command =>
-                command.id.toLowerCase().includes(query) ||
-                command.label.toLowerCase().includes(query) ||
-                command.caption.toLowerCase().includes(query)
-            )
-          : commands;
+      filteredCommands = filterCommandRecords(commands, this._query);
     } else {
       knownModules = this._getKnownModules();
+      const normalizedQuery = normalizeQuery(this._query);
       filteredKnownModules =
-        query.length > 0
+        normalizedQuery.length > 0
           ? knownModules.filter(known => {
               const haystack = [known.name, known.description, known.origin]
                 .map(value => value ?? '')
                 .join(' ')
                 .toLowerCase();
-              return haystack.includes(query);
+              return haystack.includes(normalizedQuery);
             })
           : knownModules;
     }
-
     const itemCount = isTokenView
       ? filteredTokens.length
       : isCommandView
