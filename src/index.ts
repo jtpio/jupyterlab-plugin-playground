@@ -33,6 +33,7 @@ import {
 } from '@jupyterlab/ui-components';
 
 import { IDocumentManager } from '@jupyterlab/docmanager';
+import { PathExt } from '@jupyterlab/coreutils';
 
 import { Contents } from '@jupyterlab/services';
 import { ICompletionProviderManager } from '@jupyterlab/completer';
@@ -204,6 +205,7 @@ const LIST_QUERY_ARGS_SCHEMA = {
     }
   }
 };
+
 const EXPORT_AS_EXTENSION_ARGS_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -212,6 +214,18 @@ const EXPORT_AS_EXTENSION_ARGS_SCHEMA = {
       type: 'string',
       description:
         'Optional contents path of the file to export. When omitted, the active editor file is used.'
+    }
+  }
+};
+
+const CREATE_PLUGIN_ARGS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: {
+      type: 'string',
+      description:
+        'Optional file path. Relative paths are resolved from the current working directory; paths starting with "/" are resolved from the workspace root. If no extension is provided, ".ts" is appended.'
     }
   }
 };
@@ -371,25 +385,66 @@ class PluginPlayground {
     app.commands.addCommand(CommandIDs.createNewFile, {
       label: 'TypeScript File (Playground)',
       caption: 'Create a new TypeScript file',
-      describedBy: { args: null },
+      describedBy: { args: CREATE_PLUGIN_ARGS_SCHEMA },
       icon: extensionIcon,
       execute: async args => {
-        const model = await app.commands.execute('docmanager:new-untitled', {
-          path: args['cwd'],
+        const rawPathArg =
+          typeof args.path === 'string' ? args.path.trim() : '';
+        const isRootRelativePath = rawPathArg.startsWith('/');
+
+        const model = await app.serviceManager.contents.newUntitled({
           type: 'file',
           ext: 'ts'
         });
-        const widget: IDocumentWidget<FileEditor> | undefined =
-          await app.commands.execute('docmanager:open', {
-            path: model.path,
-            factory: 'Editor'
-          });
-        if (widget) {
-          widget.content.ready.then(() => {
-            widget.content.model.sharedModel.setSource(PLUGIN_TEMPLATE);
+
+        let openPath = model.path;
+        const normalizedPathArg = normalizeContentsPath(rawPathArg);
+        if (normalizedPathArg) {
+          const baseDirectory = normalizeContentsPath(
+            PathExt.dirname(model.path)
+          );
+          let targetPath = isRootRelativePath
+            ? normalizedPathArg
+            : normalizeContentsPath(
+                PathExt.join(baseDirectory, normalizedPathArg)
+              );
+
+          if (!/\.[^/]+$/.test(targetPath)) {
+            targetPath = `${targetPath}.ts`;
+          }
+
+          if (targetPath !== model.path) {
+            openPath = (
+              await app.serviceManager.contents.rename(model.path, targetPath)
+            ).path;
+          }
+        }
+
+        await app.commands.execute('docmanager:open', {
+          path: openPath,
+          factory: 'Editor'
+        });
+
+        const normalizedOpenPath = normalizeContentsPath(openPath);
+        let widget: IDocumentWidget<FileEditor> | null = null;
+        editorTracker.forEach(candidate => {
+          if (
+            !widget &&
+            normalizeContentsPath(candidate.context.path) === normalizedOpenPath
+          ) {
+            widget = candidate;
+          }
+        });
+        if (!widget) {
+          widget = editorTracker.currentWidget;
+        }
+        const activeWidget = widget;
+        if (activeWidget) {
+          activeWidget.content.ready.then(() => {
+            activeWidget.content.model.sharedModel.setSource(PLUGIN_TEMPLATE);
           });
         }
-        return widget;
+        return activeWidget;
       }
     });
 

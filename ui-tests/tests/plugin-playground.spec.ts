@@ -261,6 +261,39 @@ test('opens a dummy extension example from the sidebar', async ({ page }) => {
   }, expectedReadmePath);
 });
 
+test('creates a plugin file with an explicit path argument', async ({
+  page,
+  tmpPath
+}) => {
+  const requestedPath = `/${tmpPath}/named-by-command`;
+  const expectedPath = `${tmpPath}/named-by-command.ts`;
+
+  try {
+    await page.goto();
+    await page.waitForCondition(() =>
+      page.evaluate((id: string) => {
+        return window.jupyterapp.commands.hasCommand(id);
+      }, CREATE_FILE_COMMAND)
+    );
+
+    const openPath = await page.evaluate(
+      async ({ id, path }) => {
+        await window.jupyterapp.commands.execute(id, { path });
+        const current = window.jupyterapp.shell
+          .currentWidget as FileEditorWidget | null;
+        return current?.context?.path ?? null;
+      },
+      {
+        id: CREATE_FILE_COMMAND,
+        path: requestedPath
+      }
+    );
+    expect(openPath).toBe(expectedPath);
+  } finally {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  }
+});
+
 test('lists tokens and searches commands via command APIs', async ({
   page
 }) => {
